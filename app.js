@@ -29,7 +29,7 @@
    (※ Gemini API 키는 절대 여기 넣지 마세요. 그건 각자 브라우저에만 저장됩니다.) */
 
 /** 배포 확인용 버전 표시. 파일을 고칠 때마다 이 값과 index.html 의 ?v= 를 같이 올리세요. */
-const APP_VERSION = 'v4 · 2026-07-27';
+const APP_VERSION = 'v5 · 2026-07-27';
 
 const BUILTIN_FB_CONFIG = {
   apiKey: "AIzaSyAM2B_-oG_n2RgQT1IGWlP9JPRYb_hN2GY",
@@ -920,9 +920,9 @@ async function geminiPost(apiVer, model, body, key) {
 function geminiHttpError(status, detail) {
   if (status === 400 && /API key/i.test(detail)) return new Error('API 키가 올바르지 않습니다. (400)');
   if (status === 403) return new Error('권한 오류(403). 키가 이 모델에 접근할 수 있는지 확인하세요.\n' + detail);
-  if (status === 429) return new Error('무료 할당량을 초과했습니다(429). 잠시 후 다시 시도하세요.');
   return new Error('Gemini API 오류 ' + status + '\n' + detail);
 }
+const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 function geminiExtract(data, opts) {
   const cand = (data.candidates || [])[0];
@@ -978,25 +978,44 @@ async function gemini(prompt, opts) {
         return geminiExtract(r.data, opts);
       }
       last = r;
-      if (r.status !== 404) throw geminiHttpError(r.status, r.detail);   /* 버전 문제 아님 */
+      if (r.status !== 404) break;      /* 404 가 아니면 API 버전 문제가 아니다 */
     }
+    /* 404(모델 없음) 와 429(그 모델의 무료 한도 0/소진) 는 다른 모델로 넘어가면 풀리는 경우가 많다 */
+    if (last.status !== 404 && last.status !== 429) throw geminiHttpError(last.status, last.detail);
     tried.push(model);
-    notes.push(model + ' → 404');
+    notes.push({ model: model, status: last.status, detail: last.detail });
     if (!avail) { try { avail = await geminiListModels(); } catch (e) { avail = []; } }
     const next = pickModel(avail, tried);
     if (!next) break;
+    if (last.status === 429) await sleep(1200);   /* 연속 호출로 한도를 더 자극하지 않도록 */
     model = next;
   }
 
   const rest = (avail || []).filter(n => tried.indexOf(n) < 0);
+  const summary = notes.map(n => n.model + ' → ' + n.status).join(', ');
+  const allQuota = notes.length > 0 && notes.every(n => n.status === 429);
+  const firstDetail = (notes[0] && notes[0].detail) || '';
+
+  if (allQuota) {
+    throw new Error(
+      '무료 할당량에 걸렸습니다. (429)\n\n' +
+      '시도한 모델: ' + summary + '\n' +
+      (firstDetail ? '\n구글 응답: ' + firstDetail.slice(0, 240) + '\n' : '') +
+      '\n이럴 때 보통 이 순서로 풀립니다.\n' +
+      '· 1~2분 기다렸다 다시 눌러보세요 (분당 요청 한도일 수 있습니다)\n' +
+      '· “내 키로 쓸 수 있는 모델 보기”에서 다른 모델을 골라보세요 — 모델마다 무료 한도가 다르고, 어떤 모델은 0입니다\n' +
+      '· aistudio.google.com/apikey 에서 키를 새 프로젝트로 다시 만들어보세요\n' +
+      '· 하루 한도를 다 썼다면 다음 날 초기화됩니다');
+  }
   throw new Error(
-    '이 API 키로 응답하는 모델을 찾지 못했습니다. (404)\n\n' +
-    '시도한 것: ' + notes.join(', ') + '\n' +
-    'API 버전: ' + versions.join(', ') + ' 모두 시도\n\n' +
+    '이 API 키로 응답하는 모델을 찾지 못했습니다.\n\n' +
+    '시도한 것: ' + summary + '\n' +
+    'API 버전: ' + versions.join(', ') + ' 모두 시도\n' +
+    (firstDetail ? '\n구글 응답: ' + firstDetail.slice(0, 240) + '\n' : '') +
     (rest.length
-      ? '아직 안 해본 모델: ' + rest.slice(0, 8).join(', ') +
+      ? '\n아직 안 해본 모델: ' + rest.slice(0, 8).join(', ') +
         '\n→ “내 키로 쓸 수 있는 모델 보기”에서 직접 하나 골라보세요.'
-      : '목록에 있는 모델을 전부 시도했습니다.\n' +
+      : '\n목록에 있는 모델을 전부 시도했습니다.\n' +
         '→ aistudio.google.com/apikey 에서 키를 새로 만들어 다시 시도해보세요.\n' +
         '   (구글 클라우드 프로젝트에 Generative Language API 가 꺼져 있을 수 있습니다)'));
 }
