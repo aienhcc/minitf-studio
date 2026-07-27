@@ -354,7 +354,8 @@
 
       <section class="card">
         <div class="card-head"><h2>실시간 공유 (Firebase)</h2><span class="chip" id="fb-status">미설정</span></div>
-        <p class="muted small">Firebase 콘솔 → 프로젝트 설정 → 내 앱 → 구성(config)의 JSON을 그대로 붙여넣으세요. README에 5분 셋업 절차가 있습니다.</p>
+        <p class="muted small">Firebase 콘솔 → 프로젝트 설정 → 내 앱 → 구성(config)을 그대로 붙여넣으세요. 중괄호가 있든 없든, 주석이 섞여 있어도 받아냅니다.</p>
+        <p class="hint" id="fb-builtin-note" hidden>✅ config가 <b>코드에 내장</b>되어 있어 따로 붙여넣을 필요가 없습니다. 아래 칸은 다른 Firebase 프로젝트로 바꿔 쓸 때만 사용하세요.</p>
         <textarea id="fb-config" rows="8" spellcheck="false" placeholder='{ "apiKey": "...", "authDomain": "...", "databaseURL": "https://xxx.firebaseio.com", "projectId": "..." }'></textarea>
         <div class="row-inline wrap-inline">
           <button class="btn btn-primary" id="fb-save" type="button">연결</button>

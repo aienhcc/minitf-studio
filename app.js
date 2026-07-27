@@ -8,6 +8,36 @@
 (function () {
 'use strict';
 
+/* ╔══════════════════════════════════════════════════════════════╗
+   ║  ▼▼▼ 여기 한 곳만 채우면 4명 모두 붙여넣기 없이 바로 로그인 ▼▼▼  ║
+   ╚══════════════════════════════════════════════════════════════╝
+   Firebase 콘솔 → 프로젝트 설정 → 내 앱 → SDK 설정 및 구성 → "구성"
+   에서 복사한 값을 아래 null 자리에 그대로 붙여넣으세요.
+
+   const BUILTIN_FB_CONFIG = {
+     apiKey: "AIza...",
+     authDomain: "minitf-xxxx.firebaseapp.com",
+     databaseURL: "https://minitf-xxxx-default-rtdb.asia-southeast1.firebasedatabase.app",
+     projectId: "minitf-xxxx",
+     storageBucket: "...",
+     messagingSenderId: "...",
+     appId: "..."
+   };
+
+   이 값들은 비밀이 아닙니다. 공개 저장소에 올라가도 안전합니다 —
+   실제 접근 통제는 Realtime Database 보안 규칙(auth != null)과 로그인이 합니다.
+   (※ Gemini API 키는 절대 여기 넣지 마세요. 그건 각자 브라우저에만 저장됩니다.) */
+
+const BUILTIN_FB_CONFIG = {
+  apiKey: "AIzaSyAM2B_-oG_n2RgQT1IGWlP9JPRYb_hN2GY",
+  authDomain: "minitf.firebaseapp.com",
+  databaseURL: "https://minitf-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "minitf",
+  storageBucket: "minitf.firebasestorage.app",
+  messagingSenderId: "410248327358",
+  appId: "1:410248327358:web:f2e618157215143fc5eeef"
+};
+
 /* ═══ 0. 유틸 ═══════════════════════════════════════════════════ */
 
 const $  = (s, r) => (r || document).querySelector(s);
@@ -24,6 +54,17 @@ const LS = {
   set(k, v) { try { localStorage.setItem('minitf.' + k, JSON.stringify(v)); } catch (e) {} },
   del(k)    { try { localStorage.removeItem('minitf.' + k); } catch (e) {} }
 };
+
+/** 쓸 Firebase config: 브라우저에 저장한 것 > 코드에 내장한 것. 연결 해제 시 null */
+function fbConfig() {
+  if (LS.get('fbOff', false)) return null;
+  const saved = LS.get('fbconfig', null);
+  if (saved && saved.databaseURL) return saved;
+  if (BUILTIN_FB_CONFIG && BUILTIN_FB_CONFIG.databaseURL) return BUILTIN_FB_CONFIG;
+  return null;
+}
+const fbIsBuiltin = () => !LS.get('fbOff', false) && !LS.get('fbconfig', null) &&
+  !!(BUILTIN_FB_CONFIG && BUILTIN_FB_CONFIG.databaseURL);
 
 function toast(msg, isErr) {
   const el = document.createElement('div');
@@ -1082,10 +1123,14 @@ function renderSettings(d) {
   set('#st-title', d.s.title); set('#st-date', d.s.date);
   set('#st-hq', d.s.hq); set('#st-field', d.s.field); set('#st-rate', d.s.rate);
   set('#st-cap', d.s.cap); set('#st-tf', d.s.tf);
-  const cfg = LS.get('fbconfig', null);
-  $('#fb-status').textContent = Store.mode === 'live' ? '연결됨' : (cfg ? '설정됨(미연결)' : '미설정');
+  const cfg = fbConfig();
+  const builtin = fbIsBuiltin();
+  $('#fb-status').textContent = Store.mode === 'live'
+    ? (builtin ? '연결됨 (코드 내장)' : '연결됨') : (cfg ? '설정됨(미연결)' : '미설정');
   $('#fb-status').dataset.on = Store.mode === 'live' ? '1' : '0';
-  if (document.activeElement !== $('#fb-config') && cfg && !$('#fb-config').value) $('#fb-config').value = JSON.stringify(cfg, null, 2);
+  const bnote = $('#fb-builtin-note'); if (bnote) bnote.hidden = !builtin;   /* index.html 이 구버전이어도 안전하게 */
+  if (document.activeElement !== $('#fb-config') && cfg && !builtin && !$('#fb-config').value)
+    $('#fb-config').value = JSON.stringify(cfg, null, 2);
 
   /* 내 계정 */
   $('#acct-status').textContent = USER ? idOf(USER.email) : '로컬 모드';
@@ -1104,23 +1149,61 @@ function renderSettings(d) {
   $(sel).addEventListener('change', e => Store.set('settings/' + key, type === 'n' ? (+e.target.value || 0) : e.target.value));
 });
 
-/* Firebase 설정 */
+/* Firebase 설정 — 콘솔에서 어떤 형태로 복사해 오든 받아냅니다.
+   ① 전체 코드 스니펫(import 문·주석 포함)  ② const firebaseConfig = {...};
+   ③ 중괄호만 있는 객체              ④ 중괄호 없이 안쪽만 (가장 흔한 실수) */
+function extractConfigObject(s) {
+  for (let i = 0; i < s.length; i++) {
+    if (s.charAt(i) !== '{') continue;
+    let depth = 0;
+    for (let j = i; j < s.length; j++) {
+      const c = s.charAt(j);
+      if (c === '{') depth++;
+      else if (c === '}') {
+        if (--depth === 0) {
+          const block = s.slice(i, j + 1);
+          if (/apiKey/.test(block)) return block;   /* import {...} 같은 다른 블록은 건너뛴다 */
+          i = j;
+          break;
+        }
+      }
+    }
+  }
+  return null;
+}
+function parseFbConfig(raw) {
+  let s = String(raw || '').trim();
+  if (!s) throw new Error('비어 있습니다.');
+  let obj = extractConfigObject(s);
+  if (!obj) {
+    if (!/apiKey/.test(s)) throw new Error('apiKey 가 보이지 않습니다. Firebase 콘솔의 “SDK 설정 및 구성 → 구성” 내용을 복사했는지 확인하세요.');
+    obj = '{' + s.replace(/^[{\s]+/, '').replace(/[};\s]+$/, '') + '}';   /* 중괄호 없이 붙여넣은 경우 */
+  }
+  const json = obj
+    .replace(/'/g, '"')                                       /* 홑따옴표 → 큰따옴표 */
+    .replace(/([{,]\s*)([A-Za-z_$][\w$]*)\s*:/g, '$1"$2":')   /* 따옴표 없는 키 */
+    .replace(/,(\s*[}\]])/g, '$1');                           /* 마지막 쉼표 */
+  return JSON.parse(json);
+}
+
 $('#fb-save').addEventListener('click', () => {
   const raw = $('#fb-config').value.trim();
-  if (!raw) return toast('config JSON을 붙여넣어주세요.', true);
+  if (!raw) return toast('config를 붙여넣어주세요.', true);
   let cfg;
-  try {
-    cfg = JSON.parse(raw.replace(/^\s*(?:const|var|let)\s+\w+\s*=\s*/, '').replace(/;\s*$/, '')
-                        .replace(/([{,]\s*)([A-Za-z_$][\w$]*)\s*:/g, '$1"$2":').replace(/'/g, '"'));
-  } catch (e) { return toast('JSON 형식이 아닙니다: ' + e.message, true); }
-  if (!cfg.databaseURL) return toast('databaseURL 이 없습니다. Realtime Database를 먼저 만들어주세요.', true);
+  try { cfg = parseFbConfig(raw); }
+  catch (e) { return toast('config를 읽지 못했습니다: ' + e.message, true); }
+  if (!cfg.apiKey) return toast('apiKey 가 없습니다. 복사한 내용을 다시 확인해주세요.', true);
+  if (!cfg.databaseURL) return toast('databaseURL 이 없습니다. Realtime Database를 먼저 만들고 config를 다시 복사하세요.', true);
+  LS.del('fbOff');
   LS.set('fbconfig', cfg);
   toast('저장했습니다. 새로고침해서 연결합니다…');
   setTimeout(() => location.reload(), 700);
 });
 $('#fb-clear').addEventListener('click', () => {
-  if (!confirm('Firebase 연결을 해제하고 로컬 모드로 돌아갈까요?')) return;
-  LS.del('fbconfig'); location.reload();
+  if (!confirm('Firebase 연결을 해제하고 로컬 모드로 돌아갈까요? (이 브라우저에서만 적용됩니다)')) return;
+  LS.del('fbconfig');
+  LS.set('fbOff', true);      /* 코드에 내장된 config 도 이 브라우저에선 쓰지 않는다 */
+  location.reload();
 });
 
 /* ═══ 산출물(기획서) 내보내기 ═════════════════════════════════
@@ -1691,7 +1774,7 @@ function boot() {
   $('#idea-tag').innerHTML = TAGS.map(t => '<option value="' + t.id + '">' + t.label + '</option>').join('');
   $('#idea-tag').value = 'activity';
 
-  const cfg = LS.get('fbconfig', null);
+  const cfg = fbConfig();
   if (cfg && typeof firebase === 'undefined') {
     setTimeout(() => toast('Firebase SDK를 불러오지 못했습니다(사내망 차단 가능). 로컬 모드로 동작합니다.', true), 500);
   }
