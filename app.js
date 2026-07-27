@@ -29,7 +29,7 @@
    (※ Gemini API 키는 절대 여기 넣지 마세요. 그건 각자 브라우저에만 저장됩니다.) */
 
 /** 배포 확인용 버전 표시. 파일을 고칠 때마다 이 값과 index.html 의 ?v= 를 같이 올리세요. */
-const APP_VERSION = 'v3 · 2026-07-27';
+const APP_VERSION = 'v4 · 2026-07-27';
 
 const BUILTIN_FB_CONFIG = {
   apiKey: "AIzaSyAM2B_-oG_n2RgQT1IGWlP9JPRYb_hN2GY",
@@ -881,61 +881,50 @@ function contextBrief() {
 
 function aiReady() { return !!LS.get('gemini.key', ''); }
 
-async function gemini(prompt, opts) {
-  opts = opts || {};
-  const key = LS.get('gemini.key', '');
-  if (!key) throw new Error('Gemini API 키가 없습니다. 위의 “Gemini 연결”에서 키를 저장하세요.');
-  const model = LS.get('gemini.model', '') || DEFAULT_MODEL;
-  const url = 'https://generativelanguage.googleapis.com/v1beta/models/' +
-    encodeURIComponent(model) + ':generateContent?key=' + encodeURIComponent(key);
-  const body = {
-    systemInstruction: { parts: [{ text: SYS }] },
-    contents: [{ role: 'user', parts: [{ text: prompt }] }],
-    generationConfig: { temperature: opts.temp == null ? 1.0 : opts.temp }
-  };
-  if (opts.json) body.generationConfig.responseMimeType = 'application/json';
+const API_HOST = 'https://generativelanguage.googleapis.com/';
+const API_VERSIONS = ['v1beta', 'v1'];
 
+/** 후보 모델을 선호 순으로 하나 고른다. 이미 실패한 것(tried)은 절대 다시 고르지 않는다. */
+function pickModel(avail, tried) {
+  const usable = avail.filter(n =>
+    tried.indexOf(n) < 0 && !/embedding|aqa|imagen|veo|tts|live|image-generation/.test(n));
+  const gemini = usable.filter(n => /^gemini/.test(n));
+  const others = usable.filter(n => !/^gemini/.test(n));       /* gemma 등은 최후 수단 */
+  const prefs = [
+    n => /2\.5-flash$/.test(n),
+    n => /flash-latest$/.test(n),
+    n => /2\.0-flash$/.test(n),
+    n => /flash/.test(n) && !/lite/.test(n),
+    n => /flash/.test(n),
+    n => /pro/.test(n)
+  ];
+  for (let i = 0; i < prefs.length; i++) { const hit = gemini.filter(prefs[i])[0]; if (hit) return hit; }
+  return gemini[0] || others[0] || null;
+}
+
+async function geminiPost(apiVer, model, body, key) {
+  const url = API_HOST + apiVer + '/models/' + encodeURIComponent(model) +
+    ':generateContent?key=' + encodeURIComponent(key);
   let res;
   try {
     res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   } catch (e) {
     throw new Error('네트워크 오류로 Gemini에 연결하지 못했습니다.\n사내망에서 generativelanguage.googleapis.com 이 차단되어 있을 수 있습니다.');
   }
-  if (!res.ok) {
-    let detail = '';
-    try { const j = await res.json(); detail = (j.error && j.error.message) || ''; } catch (e) {}
-    if (res.status === 400 && /API key/i.test(detail)) throw new Error('API 키가 올바르지 않습니다. (400)');
-    if (res.status === 403) throw new Error('권한 오류(403). 키가 이 모델에 접근할 수 있는지 확인하세요.\n' + detail);
-    if (res.status === 404) {
-      /* 모델명이 틀렸거나 이 키로 접근할 수 없는 경우.
-         키마다 쓸 수 있는 모델이 다르므로, 목록을 조회해 되는 모델로 자동 교체하고 한 번만 재시도한다. */
-      let avail = [];
-      try { avail = await geminiListModels(); } catch (e2) {}
-      const usable = avail.filter(n => !/embedding|aqa|imagen|tts|live|image-generation/.test(n));
-      const pick = usable.find(n => /2\.5-flash$/.test(n))
-                || usable.find(n => /flash-latest$/.test(n))
-                || usable.find(n => /flash/.test(n) && !/lite/.test(n))
-                || usable.find(n => /flash/.test(n))
-                || usable[0];
-      if (pick && !opts._retried) {
-        LS.set('gemini.model', pick);
-        LS.del('gemini.verified');
-        toast('“' + model + '” 을 쓸 수 없어 “' + pick + '” 로 자동 변경했습니다');
-        const el = $('#ai-model'); if (el) el.value = pick;
-        render();
-        return gemini(prompt, Object.assign({}, opts, { _retried: true }));
-      }
-      throw new Error('이 API 키로는 모델 “' + model + '”을 쓸 수 없습니다. (404)' +
-        (usable.length
-          ? '\n\n쓸 수 있는 모델:\n· ' + usable.slice(0, 8).join('\n· ') +
-            '\n\n“내 키로 쓸 수 있는 모델 보기”에서 골라주세요.'
-          : '\n\n이 키로 쓸 수 있는 생성 모델이 하나도 없습니다.\n' +
-            'aistudio.google.com/apikey 에서 키를 새로 만들어보세요.'));
-    }
-    if (res.status === 429) throw new Error('무료 할당량을 초과했습니다(429). 잠시 후 다시 시도하세요.');
-    throw new Error('Gemini API 오류 ' + res.status + '\n' + detail);
-  }
-  const data = await res.json();
+  if (res.ok) return { ok: true, data: await res.json() };
+  let detail = '';
+  try { const j = await res.json(); detail = (j.error && j.error.message) || ''; } catch (e) {}
+  return { ok: false, status: res.status, detail: detail };
+}
+
+function geminiHttpError(status, detail) {
+  if (status === 400 && /API key/i.test(detail)) return new Error('API 키가 올바르지 않습니다. (400)');
+  if (status === 403) return new Error('권한 오류(403). 키가 이 모델에 접근할 수 있는지 확인하세요.\n' + detail);
+  if (status === 429) return new Error('무료 할당량을 초과했습니다(429). 잠시 후 다시 시도하세요.');
+  return new Error('Gemini API 오류 ' + status + '\n' + detail);
+}
+
+function geminiExtract(data, opts) {
   const cand = (data.candidates || [])[0];
   const text = ((cand && cand.content && cand.content.parts) || []).map(p => p.text || '').join('').trim();
   if (!text) {
@@ -950,6 +939,66 @@ async function gemini(prompt, opts) {
     if (m) { try { return JSON.parse(m[0]); } catch (e2) {} }
     throw new Error('JSON 파싱 실패. 모델 응답:\n' + text.slice(0, 400));
   }
+}
+
+/* 모델 목록에 이름이 있어도 실제 호출은 404 가 나는 경우가 있습니다(API 버전·리전 차이).
+   그래서 ① v1beta → v1 두 버전을 시도하고 ② 그래도 안 되면 다음 후보 모델로 넘어갑니다.
+   성공한 조합은 저장해 다음부터 한 번에 붙습니다. */
+async function gemini(prompt, opts) {
+  opts = opts || {};
+  const key = LS.get('gemini.key', '');
+  if (!key) throw new Error('Gemini API 키가 없습니다. 위의 “Gemini 연결”에서 키를 저장하세요.');
+  const body = {
+    systemInstruction: { parts: [{ text: SYS }] },
+    contents: [{ role: 'user', parts: [{ text: prompt }] }],
+    generationConfig: { temperature: opts.temp == null ? 1.0 : opts.temp }
+  };
+  if (opts.json) body.generationConfig.responseMimeType = 'application/json';
+
+  const startModel = LS.get('gemini.model', '') || DEFAULT_MODEL;
+  const prefVer = LS.get('gemini.apiVersion', '');
+  const versions = prefVer ? [prefVer].concat(API_VERSIONS.filter(v => v !== prefVer)) : API_VERSIONS.slice();
+
+  let model = startModel, avail = null;
+  const tried = [], notes = [];
+
+  for (let round = 0; round < 4; round++) {
+    let last = null;
+    for (let i = 0; i < versions.length; i++) {
+      const r = await geminiPost(versions[i], model, body, key);
+      if (r.ok) {
+        LS.set('gemini.model', model);
+        LS.set('gemini.apiVersion', versions[i]);
+        if (model !== startModel) {
+          LS.del('gemini.verified');
+          const el = $('#ai-model'); if (el) el.value = model;
+          toast('“' + startModel + '” 이 안 되어 “' + model + '” 로 바꿔 처리했습니다');
+          render();
+        }
+        return geminiExtract(r.data, opts);
+      }
+      last = r;
+      if (r.status !== 404) throw geminiHttpError(r.status, r.detail);   /* 버전 문제 아님 */
+    }
+    tried.push(model);
+    notes.push(model + ' → 404');
+    if (!avail) { try { avail = await geminiListModels(); } catch (e) { avail = []; } }
+    const next = pickModel(avail, tried);
+    if (!next) break;
+    model = next;
+  }
+
+  const rest = (avail || []).filter(n => tried.indexOf(n) < 0);
+  throw new Error(
+    '이 API 키로 응답하는 모델을 찾지 못했습니다. (404)\n\n' +
+    '시도한 것: ' + notes.join(', ') + '\n' +
+    'API 버전: ' + versions.join(', ') + ' 모두 시도\n\n' +
+    (rest.length
+      ? '아직 안 해본 모델: ' + rest.slice(0, 8).join(', ') +
+        '\n→ “내 키로 쓸 수 있는 모델 보기”에서 직접 하나 골라보세요.'
+      : '목록에 있는 모델을 전부 시도했습니다.\n' +
+        '→ aistudio.google.com/apikey 에서 키를 새로 만들어 다시 시도해보세요.\n' +
+        '   (구글 클라우드 프로젝트에 Generative Language API 가 꺼져 있을 수 있습니다)'));
 }
 
 /** 이 API 키로 generateContent 를 쓸 수 있는 모델 이름 목록 */
@@ -1016,11 +1065,13 @@ $('#ai-clear').addEventListener('click', () => {
 });
 $('#ai-test').addEventListener('click', async () => {
   aiBusy('#ai-out-key', '연결 테스트 중…');
-  const model = LS.get('gemini.model', '') || DEFAULT_MODEL;
   try {
     const t = await gemini('연결 테스트입니다. "연결 정상"이라고만 답하세요.', { temp: 0 });
-    LS.set('gemini.verified', model);
-    $('#ai-out-key').innerHTML = '<div class="ai-card">✅ <b>' + esc(model) + '</b> 응답: ' + esc(t) + '</div>';
+    const used = LS.get('gemini.model', '') || DEFAULT_MODEL;   /* 자동 교체됐을 수 있으므로 끝나고 읽는다 */
+    const ver = LS.get('gemini.apiVersion', '') || 'v1beta';
+    LS.set('gemini.verified', used);
+    $('#ai-out-key').innerHTML = '<div class="ai-card">✅ <b>' + esc(used) +
+      '</b> <span class="muted small">(' + esc(ver) + ')</span><br>' + esc(t) + '</div>';
     render();
   } catch (e) { LS.del('gemini.verified'); aiError('#ai-out-key', e); render(); }
 });
