@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>미니TF 스튜디오 — 워크숍 기획 보드</title>
+<meta name="description" content="4인 미니 TF가 함께 쓰는 워크숍 기획 대시보드">
+<link rel="stylesheet" href="styles.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎪</text></svg>">
+</head>
+<body data-palette="#2a78d6,#eb6834,#1baf7a,#eda100,#e87ba4,#008300,#4a3aa7,#e34948">
+
+<!-- ══════════ 게이트 (로그인 / 비밀번호 변경 / 로컬 시작) ══════════ -->
+<div id="gate" class="overlay" hidden>
+  <div class="overlay-card">
+    <div class="brand brand-lg"><span class="brand-mark">🎪</span><span>미니TF 스튜디오</span></div>
+
+    <!-- 패널 1: 로그인 -->
+    <div class="panel" data-panel="login" hidden>
+      <p class="muted">TF 계정으로 로그인하세요.</p>
+      <form id="login-form" autocomplete="on">
+        <label class="field">
+          <span>아이디</span>
+          <input id="lg-id" type="text" list="tf-ids" placeholder="kian" autocomplete="username" autocapitalize="off" spellcheck="false">
+          <datalist id="tf-ids">
+            <option value="kian"></option><option value="joon"></option>
+            <option value="eugene"></option><option value="sean"></option>
+          </datalist>
+        </label>
+        <label class="field">
+          <span>비밀번호</span>
+          <input id="lg-pw" type="password" autocomplete="current-password">
+        </label>
+        <p class="gate-err" id="lg-err" hidden></p>
+        <button class="btn btn-primary btn-block" id="lg-go" type="submit">로그인</button>
+      </form>
+      <p class="hint">비밀번호를 잊었다면 TF 관리자(Firebase 콘솔 접근 가능한 사람)에게 재설정을 요청하세요.</p>
+    </div>
+
+    <!-- 패널 2: 비밀번호 변경 -->
+    <div class="panel" data-panel="pw" hidden>
+      <p class="muted" id="pw-lead">비밀번호를 변경합니다.</p>
+      <form id="pw-form">
+        <label class="field" id="pw-cur-wrap">
+          <span>현재 비밀번호</span>
+          <input id="pw-cur" type="password" autocomplete="current-password">
+        </label>
+        <label class="field">
+          <span>새 비밀번호 <small class="muted">— 8자 이상</small></span>
+          <input id="pw-new" type="password" autocomplete="new-password">
+        </label>
+        <label class="field">
+          <span>새 비밀번호 확인</span>
+          <input id="pw-new2" type="password" autocomplete="new-password">
+        </label>
+        <p class="gate-err" id="pw-err" hidden></p>
+        <button class="btn btn-primary btn-block" id="pw-go" type="submit">변경하기</button>
+      </form>
+      <button class="linkbtn" id="pw-skip" type="button" style="margin-top:10px" hidden>나중에 하기</button>
+    </div>
+
+    <!-- 패널 3: 로컬 모드 시작 (Firebase 미설정) -->
+    <div class="panel" data-panel="local" hidden>
+      <p class="muted">아직 Firebase를 연결하지 않아 <b>이 브라우저에만</b> 저장됩니다. 설정 탭에서 연결하면 4명이 로그인해 실시간으로 같이 씁니다.</p>
+      <label class="field">
+        <span>닉네임</span>
+        <input id="ob-nick" type="text" maxlength="12" placeholder="예: 라면장인" autocomplete="off">
+      </label>
+      <label class="field">
+        <span>방 코드</span>
+        <div class="row-inline">
+          <input id="ob-room" type="text" maxlength="24" placeholder="minitf-2026" autocomplete="off">
+          <button class="btn btn-ghost" id="ob-room-gen" type="button">랜덤</button>
+        </div>
+      </label>
+      <button class="btn btn-primary btn-block" id="ob-start" type="button">로컬 모드로 시작</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════ 헤더 ══════════ -->
+<header class="topbar">
+  <div class="brand"><span class="brand-mark">🎪</span><span class="brand-name">미니TF 스튜디오</span></div>
+  <div class="topbar-right">
+    <div id="presence" class="presence" title="지금 보고 있는 사람"></div>
+    <button class="chip chip-btn" id="btn-share" type="button" title="방 링크 복사">
+      <span id="room-label">방 —</span>
+    </button>
+    <span class="chip" id="sync-chip" data-state="local">로컬</span>
+    <button class="icon-btn" id="btn-theme" type="button" title="라이트/다크 전환" aria-label="테마 전환">◐</button>
+    <button class="chip chip-btn" id="btn-me" type="button" title="닉네임 변경">—</button>
+    <button class="icon-btn" id="btn-logout" type="button" title="로그아웃" aria-label="로그아웃" hidden>⏻</button>
+  </div>
+</header>
+
+<!-- ══════════ 탭 ══════════ -->
+<nav class="tabs" role="tablist">
+  <button class="tab is-active" data-view="dash" role="tab">대시보드</button>
+  <button class="tab" data-view="ideas" role="tab">아이디어 보드</button>
+  <button class="tab" data-view="teams" role="tab">조 편성</button>
+  <button class="tab" data-view="agenda" role="tab">타임테이블</button>
+  <button class="tab" data-view="budget" role="tab">예산 · 준비물</button>
+  <button class="tab" data-view="ai" role="tab">AI 스튜디오</button>
+  <button class="tab" data-view="settings" role="tab">설정</button>
+</nav>
+
+<main class="wrap">
+
+  <!-- ─────── 대시보드 ─────── -->
+  <section class="view is-active" id="view-dash">
+    <div class="view-actions">
+      <button class="btn btn-ghost" data-dl="md" type="button">📄 기획서 MD 저장</button>
+      <button class="btn btn-ghost" data-dl="html" type="button">🌐 기획서 HTML 저장</button>
+      <button class="btn btn-ghost" data-dl="copy" type="button">📋 MD 복사</button>
+    </div>
+    <div class="hero-row">
+      <div class="hero-card">
+        <div class="hero-label" id="hero-label">행사까지</div>
+        <div class="hero-figure" id="hero-value">—</div>
+        <div class="hero-sub" id="hero-sub"></div>
+      </div>
+      <div class="kpi-row" id="kpi-row"></div>
+    </div>
+
+    <div class="grid-2">
+      <section class="card">
+        <div class="card-head">
+          <h2>조 편성 현황</h2>
+          <span class="muted small" id="dash-assign-sub"></span>
+        </div>
+        <div id="dash-teams" class="meter-list"></div>
+        <div class="legend" id="dash-org-legend">
+          <span class="legend-item"><i class="swatch" style="background:var(--org-hq)"></i>본사</span>
+          <span class="legend-item"><i class="swatch" style="background:var(--org-field)"></i>파견</span>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card-head">
+          <h2>반나절 타임라인</h2>
+          <span class="muted small" id="dash-time-sub"></span>
+        </div>
+        <div id="dash-timeline"></div>
+        <div class="legend" id="dash-agenda-legend"></div>
+      </section>
+
+      <section class="card">
+        <div class="card-head"><h2>예산</h2><span class="muted small" id="dash-budget-sub"></span></div>
+        <div id="dash-budget"></div>
+      </section>
+
+      <section class="card">
+        <div class="card-head"><h2>준비물 진행률</h2><span class="muted small" id="dash-check-sub"></span></div>
+        <div id="dash-check"></div>
+      </section>
+    </div>
+
+    <section class="card">
+      <div class="card-head"><h2>인기 아이디어</h2><span class="muted small">좋아요 순 상위 5</span></div>
+      <div id="dash-ideas" class="mini-list"></div>
+    </section>
+
+    <div id="empty-cta" class="empty-cta" hidden>
+      <p>보드가 비어 있습니다. 시작 템플릿을 불러오면 조·타임테이블·예산 초안이 한 번에 채워집니다.</p>
+      <button class="btn btn-primary" id="btn-seed" type="button">시작 템플릿 불러오기</button>
+    </div>
+  </section>
+
+  <!-- ─────── 아이디어 보드 ─────── -->
+  <section class="view" id="view-ideas">
+    <section class="card">
+      <div class="card-head"><h2>아이디어 추가</h2></div>
+      <div class="form-grid">
+        <input id="idea-title" type="text" placeholder="한 줄 아이디어 (예: 조별 라면 블라인드 테스트)" maxlength="80">
+        <select id="idea-tag"></select>
+        <button class="btn btn-primary" id="idea-add" type="button">추가</button>
+      </div>
+      <textarea id="idea-desc" rows="2" placeholder="설명 · 진행 방식 (선택)"></textarea>
+    </section>
+
+    <div class="toolbar">
+      <div class="seg" id="idea-filter">
+        <button class="seg-btn is-active" data-tag="all" type="button">전체</button>
+      </div>
+      <div class="seg" id="idea-sort">
+        <button class="seg-btn is-active" data-sort="votes" type="button">좋아요순</button>
+        <button class="seg-btn" data-sort="new" type="button">최신순</button>
+      </div>
+    </div>
+
+    <div id="idea-list" class="idea-grid"></div>
+  </section>
+
+  <!-- ─────── 조 편성 ─────── -->
+  <section class="view" id="view-teams">
+    <div class="grid-2">
+      <section class="card">
+        <div class="card-head"><h2>테마 조</h2><span class="muted small">최대 8개까지 고유 색이 배정됩니다</span></div>
+        <div class="form-grid form-grid-team">
+          <input id="team-emoji" type="text" placeholder="🎳" maxlength="4">
+          <input id="team-name" type="text" placeholder="조 이름 (예: 볼링조)" maxlength="20">
+          <input id="team-cap" type="number" placeholder="정원" min="1" max="99">
+          <input id="team-cost" type="number" placeholder="1인 단가(원)" min="0" step="1000">
+          <button class="btn btn-primary" id="team-add" type="button">추가</button>
+        </div>
+        <div id="team-list" class="team-list"></div>
+      </section>
+
+      <section class="card">
+        <div class="card-head"><h2>참가자 (익명 닉네임)</h2><span class="muted small" id="roster-count"></span></div>
+        <div class="form-grid form-grid-roster">
+          <input id="ros-nick" type="text" placeholder="닉네임" maxlength="16">
+          <select id="ros-org"><option value="hq">본사</option><option value="field">파견</option></select>
+          <select id="ros-pref"></select>
+          <button class="btn btn-primary" id="ros-add" type="button">추가</button>
+        </div>
+        <div class="row-inline wrap-inline">
+          <button class="btn btn-ghost" id="ros-bulk" type="button">참가자 슬롯 자동 생성</button>
+          <button class="btn btn-ghost" id="ros-auto" type="button">자동 배정 (희망 우선 · 본사/파견 섞기)</button>
+          <button class="btn btn-ghost btn-danger" id="ros-clear" type="button">배정 초기화</button>
+        </div>
+        <div id="roster-list" class="roster-list"></div>
+      </section>
+    </div>
+  </section>
+
+  <!-- ─────── 타임테이블 ─────── -->
+  <section class="view" id="view-agenda">
+    <section class="card">
+      <div class="card-head"><h2>블록 추가</h2><span class="muted small">드래그 또는 ↑↓ 로 순서 변경</span></div>
+      <div class="form-grid form-grid-agenda">
+        <input id="ag-label" type="text" placeholder="블록 이름 (예: 타운홀)" maxlength="40">
+        <input id="ag-min" type="number" placeholder="분" min="5" step="5">
+        <select id="ag-type">
+          <option value="all">전체 세션</option>
+          <option value="group">조별 활동</option>
+          <option value="meal">식사</option>
+          <option value="move">이동 · 버퍼</option>
+        </select>
+        <button class="btn btn-primary" id="ag-add" type="button">추가</button>
+      </div>
+    </section>
+    <section class="card">
+      <div class="card-head">
+        <h2>진행표</h2>
+        <div class="row-inline">
+          <label class="inline-field"><span>시작</span><input id="ag-start" type="time" step="300"></label>
+          <span class="muted small" id="ag-total"></span>
+        </div>
+      </div>
+      <div id="agenda-list" class="agenda-list"></div>
+    </section>
+  </section>
+
+  <!-- ─────── 예산 · 준비물 ─────── -->
+  <section class="view" id="view-budget">
+    <div class="grid-2">
+      <section class="card">
+        <div class="card-head"><h2>예산</h2><span class="muted small" id="budget-cap-sub"></span></div>
+        <div class="form-grid form-grid-budget">
+          <input id="bg-label" type="text" placeholder="항목 (예: 다과 · 음료)" maxlength="40">
+          <input id="bg-amount" type="number" placeholder="금액(원)" min="0" step="1000">
+          <select id="bg-type">
+            <option value="fixed">총액</option>
+            <option value="perPerson">1인당</option>
+          </select>
+          <button class="btn btn-primary" id="bg-add" type="button">추가</button>
+        </div>
+        <div class="scroll-x"><table class="tbl" id="budget-table"></table></div>
+        <div id="budget-meter"></div>
+      </section>
+
+      <section class="card">
+        <div class="card-head"><h2>준비물 · 할 일</h2><span class="muted small" id="check-sub"></span></div>
+        <div class="form-grid form-grid-check">
+          <input id="ck-task" type="text" placeholder="할 일 (예: 볼링장 단체 예약)" maxlength="60">
+          <select id="ck-owner"></select>
+          <input id="ck-due" type="date">
+          <button class="btn btn-primary" id="ck-add" type="button">추가</button>
+        </div>
+        <div id="check-list" class="check-list"></div>
+      </section>
+    </div>
+  </section>
+
+  <!-- ─────── AI 스튜디오 ─────── -->
+  <section class="view" id="view-ai">
+    <section class="card" id="ai-key-card">
+      <div class="card-head"><h2>Gemini 연결</h2><span class="chip" id="ai-status">미연결</span></div>
+      <p class="muted small">Google AI Studio에서 발급한 API 키를 넣으면 아래 4가지 기능이 켜집니다. 키는 <b>이 브라우저에만</b> 저장되고 Firebase에는 절대 올라가지 않습니다.</p>
+      <div class="form-grid form-grid-key">
+        <input id="ai-key" type="password" placeholder="AIza..." autocomplete="off">
+        <input id="ai-model" type="text" placeholder="gemini-2.5-flash">
+        <button class="btn btn-primary" id="ai-save" type="button">저장</button>
+        <button class="btn btn-ghost" id="ai-test" type="button">연결 테스트</button>
+      </div>
+      <p class="hint">키는 브라우저에 저장되므로 공용 PC에서는 사용 후 <b>키 삭제</b>를 눌러주세요. <button class="linkbtn" id="ai-clear" type="button">키 삭제</button></p>
+    </section>
+
+    <div class="grid-2">
+      <section class="card ai-tool">
+        <div class="card-head"><h2>① 아이디어 확장</h2></div>
+        <p class="muted small">보드의 아이디어 하나를 골라 구체안 3개로 늘립니다.</p>
+        <select id="ai-idea-pick"></select>
+        <button class="btn btn-primary" id="ai-run-expand" type="button">확장하기</button>
+        <div class="ai-out" id="ai-out-expand"></div>
+      </section>
+
+      <section class="card ai-tool">
+        <div class="card-head"><h2>② 아이스브레이킹 콘텐츠</h2></div>
+        <p class="muted small">본사·파견이 섞여 서로 알아가는 데 쓸 퀴즈 / 질문 / 진행 멘트를 만듭니다.</p>
+        <div class="seg" id="ai-ice-kind">
+          <button class="seg-btn is-active" data-kind="quiz" type="button">퀴즈</button>
+          <button class="seg-btn" data-kind="question" type="button">질문</button>
+          <button class="seg-btn" data-kind="script" type="button">진행 멘트</button>
+        </div>
+        <button class="btn btn-primary" id="ai-run-ice" type="button">생성하기</button>
+        <div class="ai-out" id="ai-out-ice"></div>
+      </section>
+
+      <section class="card ai-tool">
+        <div class="card-head"><h2>③ 회의 내용 정리</h2></div>
+        <p class="muted small">모여서 나눈 얘기를 붙여넣으면 결정사항 / 할 일 / 아이디어로 쪼개서 보드에 꽂아줍니다.</p>
+        <textarea id="ai-notes" rows="6" placeholder="회의 메모를 그대로 붙여넣으세요..."></textarea>
+        <button class="btn btn-primary" id="ai-run-notes" type="button">정리하기</button>
+        <div class="ai-out" id="ai-out-notes"></div>
+      </section>
+
+      <section class="card ai-tool">
+        <div class="card-head"><h2>④ 조 편성 추천</h2></div>
+        <p class="muted small">현재 조·참가자·희망을 보고 균형 잡힌 편성안과 근거를 제안합니다.</p>
+        <input id="ai-team-note" type="text" placeholder="추가 조건 (예: 파견 인원이 한 조에 몰리지 않게)" maxlength="120">
+        <button class="btn btn-primary" id="ai-run-teams" type="button">추천받기</button>
+        <div class="ai-out" id="ai-out-teams"></div>
+      </section>
+    </div>
+  </section>
+
+  <!-- ─────── 설정 ─────── -->
+  <section class="view" id="view-settings">
+    <div class="grid-2">
+      <section class="card">
+        <div class="card-head"><h2>행사 기본값</h2></div>
+        <label class="field"><span>행사 이름</span><input id="st-title" type="text" maxlength="40"></label>
+        <label class="field"><span>행사 날짜</span><input id="st-date" type="date"></label>
+        <div class="form-grid form-grid-3">
+          <label class="field"><span>본사 인원</span><input id="st-hq" type="number" min="0"></label>
+          <label class="field"><span>파견 인원</span><input id="st-field" type="number" min="0"></label>
+          <label class="field"><span>참석률(%)</span><input id="st-rate" type="number" min="1" max="100"></label>
+        </div>
+        <label class="field"><span>예산 상한 (원)</span><input id="st-cap" type="number" min="0" step="10000"></label>
+        <label class="field"><span>TF 멤버 (쉼표로 구분)</span><input id="st-tf" type="text" placeholder="닉A, 닉B, 닉C, 닉D"></label>
+      </section>
+
+      <section class="card">
+        <div class="card-head"><h2>실시간 공유 (Firebase)</h2><span class="chip" id="fb-status">미설정</span></div>
+        <p class="muted small">Firebase 콘솔 → 프로젝트 설정 → 내 앱 → 구성(config)의 JSON을 그대로 붙여넣으세요. README에 5분 셋업 절차가 있습니다.</p>
+        <textarea id="fb-config" rows="8" spellcheck="false" placeholder='{ "apiKey": "...", "authDomain": "...", "databaseURL": "https://xxx.firebaseio.com", "projectId": "..." }'></textarea>
+        <div class="row-inline wrap-inline">
+          <button class="btn btn-primary" id="fb-save" type="button">연결</button>
+          <button class="btn btn-ghost btn-danger" id="fb-clear" type="button">연결 해제 (로컬 모드)</button>
+        </div>
+        <p class="hint">설정은 이 브라우저에만 저장됩니다. TF 4명이 각자 한 번씩 붙여넣으면 같은 보드를 실시간으로 보게 됩니다.</p>
+      </section>
+
+      <section class="card">
+        <div class="card-head"><h2>내 계정</h2><span class="chip" id="acct-status">로컬 모드</span></div>
+        <p class="muted small" id="acct-info">Firebase를 연결하면 TF 계정으로 로그인해서 씁니다.</p>
+        <div class="row-inline wrap-inline">
+          <button class="btn btn-ghost" id="btn-pw" type="button" hidden>비밀번호 변경</button>
+          <button class="btn btn-ghost" id="btn-logout2" type="button" hidden>로그아웃</button>
+        </div>
+        <label class="field" style="margin-top:10px"><span>보드 방 코드</span>
+          <div class="row-inline">
+            <input id="st-room" type="text" maxlength="24" placeholder="minitf">
+            <button class="btn btn-ghost" id="btn-room-go" type="button">이동</button>
+          </div>
+        </label>
+        <p class="hint">4명이 <b>같은 방 코드</b>를 써야 같은 보드를 봅니다. 기본값은 <code>minitf</code> 입니다.</p>
+      </section>
+
+      <section class="card">
+        <div class="card-head"><h2>산출물 내보내기</h2></div>
+        <p class="muted small">지금 보드 내용을 <b>사람이 읽는 기획서</b> 한 장으로 뽑습니다. 사내로 옮겨 이어서 작업하기 좋은 형식입니다.</p>
+        <div class="row-inline wrap-inline">
+          <button class="btn btn-primary" data-dl="md" type="button">📄 Markdown (.md)</button>
+          <button class="btn btn-ghost" data-dl="html" type="button">🌐 HTML (인쇄용)</button>
+          <button class="btn btn-ghost" data-dl="copy" type="button">📋 MD 복사</button>
+        </div>
+        <p class="hint">개요 · 타임테이블 · 조 편성표 · 예산 · 준비물 · 아이디어 랭킹이 모두 들어갑니다.
+          HTML은 파일 하나로 완결되어 그대로 인쇄하거나 메일에 첨부할 수 있습니다.</p>
+      </section>
+
+      <section class="card">
+        <div class="card-head"><h2>백업 · 복원</h2></div>
+        <div class="row-inline wrap-inline">
+          <button class="btn btn-ghost" id="btn-export" type="button">JSON 내보내기</button>
+          <button class="btn btn-ghost" id="btn-import" type="button">JSON 가져오기</button>
+          <button class="btn btn-ghost" id="btn-seed2" type="button">시작 템플릿 불러오기</button>
+          <button class="btn btn-ghost btn-danger" id="btn-reset" type="button">보드 전체 삭제</button>
+        </div>
+        <input id="file-import" type="file" accept="application/json" hidden>
+        <p class="hint">가져오기는 <b>덮어쓰기</b>입니다. 실행 전에 내보내기로 백업해 두세요.</p>
+      </section>
+    </div>
+  </section>
+</main>
+
+<div id="toasts" class="toasts" aria-live="polite"></div>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
