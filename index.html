@@ -5,7 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>미니TF 스튜디오 — 워크숍 기획 보드</title>
 <meta name="description" content="4인 미니 TF가 함께 쓰는 워크숍 기획 대시보드">
-<link rel="stylesheet" href="styles.css">
+<!-- ?v= 를 올리면 브라우저가 캐시를 무시하고 새 파일을 받습니다. 파일을 고칠 때마다 숫자를 올리세요. -->
+<link rel="stylesheet" href="styles.css?v=3">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎪</text></svg>">
 </head>
 <body data-palette="#2a78d6,#eb6834,#1baf7a,#eda100,#e87ba4,#008300,#4a3aa7,#e34948">
@@ -407,6 +408,13 @@
         <input id="file-import" type="file" accept="application/json" hidden>
         <p class="hint">가져오기는 <b>덮어쓰기</b>입니다. 실행 전에 내보내기로 백업해 두세요.</p>
       </section>
+
+      <section class="card">
+        <div class="card-head"><h2>버전</h2></div>
+        <p class="muted small">지금 이 브라우저가 실행 중인 코드 버전입니다. 파일을 새로 올렸는데 이 값이 안 바뀌면 캐시가 남은 겁니다.</p>
+        <p><code id="app-version">—</code></p>
+        <button class="btn btn-ghost" id="btn-hardreload" type="button">캐시 비우고 새로 받기</button>
+      </section>
     </div>
   </section>
 </main>
@@ -416,6 +424,6 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
-<script src="app.js"></script>
+<script src="app.js?v=3"></script>
 </body>
 </html>

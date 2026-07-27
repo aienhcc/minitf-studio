@@ -28,6 +28,9 @@
    실제 접근 통제는 Realtime Database 보안 규칙(auth != null)과 로그인이 합니다.
    (※ Gemini API 키는 절대 여기 넣지 마세요. 그건 각자 브라우저에만 저장됩니다.) */
 
+/** 배포 확인용 버전 표시. 파일을 고칠 때마다 이 값과 index.html 의 ?v= 를 같이 올리세요. */
+const APP_VERSION = 'v3 · 2026-07-27';
+
 const BUILTIN_FB_CONFIG = {
   apiKey: "AIzaSyAM2B_-oG_n2RgQT1IGWlP9JPRYb_hN2GY",
   authDomain: "minitf.firebaseapp.com",
@@ -1228,6 +1231,9 @@ function renderSettings(d) {
   $('#btn-pw').hidden = !USER;
   $('#btn-logout2').hidden = !USER;
   set('#st-room', Store.room || '');
+
+  const ver = $('#app-version');
+  if (ver) ver.textContent = APP_VERSION;
 }
 
 [['#st-title', 'title', 's'], ['#st-date', 'date', 's'], ['#st-hq', 'hq', 'n'],
@@ -1895,7 +1901,15 @@ $('#ob-start').addEventListener('click', () => {
 $('#ob-nick').addEventListener('keydown', e => { if (e.key === 'Enter') $('#ob-start').click(); });
 $('#ob-room').addEventListener('keydown', e => { if (e.key === 'Enter') $('#ob-start').click(); });
 
+/* 캐시 비우고 새로 받기 — ?v= 쿼리를 새 값으로 바꿔 강제로 다시 내려받게 한다 */
+const hard = $('#btn-hardreload');
+if (hard) hard.addEventListener('click', () => {
+  const base = location.origin + location.pathname;
+  location.replace(base + '?cb=' + Date.now() + location.hash);
+});
+
 boot();
-window.MiniTF = { Store: Store, derived: derived, seed: seed };   /* 콘솔 디버그용 */
+console.log('%c미니TF 스튜디오 ' + APP_VERSION, 'font-weight:700');
+window.MiniTF = { Store: Store, derived: derived, seed: seed, version: APP_VERSION };   /* 콘솔 디버그용 */
 
 })();
