@@ -903,7 +903,32 @@ async function gemini(prompt, opts) {
     try { const j = await res.json(); detail = (j.error && j.error.message) || ''; } catch (e) {}
     if (res.status === 400 && /API key/i.test(detail)) throw new Error('API 키가 올바르지 않습니다. (400)');
     if (res.status === 403) throw new Error('권한 오류(403). 키가 이 모델에 접근할 수 있는지 확인하세요.\n' + detail);
-    if (res.status === 404) throw new Error('모델 “' + model + '”을 찾을 수 없습니다. 모델명을 확인하세요. (404)');
+    if (res.status === 404) {
+      /* 모델명이 틀렸거나 이 키로 접근할 수 없는 경우.
+         키마다 쓸 수 있는 모델이 다르므로, 목록을 조회해 되는 모델로 자동 교체하고 한 번만 재시도한다. */
+      let avail = [];
+      try { avail = await geminiListModels(); } catch (e2) {}
+      const usable = avail.filter(n => !/embedding|aqa|imagen|tts|live|image-generation/.test(n));
+      const pick = usable.find(n => /2\.5-flash$/.test(n))
+                || usable.find(n => /flash-latest$/.test(n))
+                || usable.find(n => /flash/.test(n) && !/lite/.test(n))
+                || usable.find(n => /flash/.test(n))
+                || usable[0];
+      if (pick && !opts._retried) {
+        LS.set('gemini.model', pick);
+        LS.del('gemini.verified');
+        toast('“' + model + '” 을 쓸 수 없어 “' + pick + '” 로 자동 변경했습니다');
+        const el = $('#ai-model'); if (el) el.value = pick;
+        render();
+        return gemini(prompt, Object.assign({}, opts, { _retried: true }));
+      }
+      throw new Error('이 API 키로는 모델 “' + model + '”을 쓸 수 없습니다. (404)' +
+        (usable.length
+          ? '\n\n쓸 수 있는 모델:\n· ' + usable.slice(0, 8).join('\n· ') +
+            '\n\n“내 키로 쓸 수 있는 모델 보기”에서 골라주세요.'
+          : '\n\n이 키로 쓸 수 있는 생성 모델이 하나도 없습니다.\n' +
+            'aistudio.google.com/apikey 에서 키를 새로 만들어보세요.'));
+    }
     if (res.status === 429) throw new Error('무료 할당량을 초과했습니다(429). 잠시 후 다시 시도하세요.');
     throw new Error('Gemini API 오류 ' + res.status + '\n' + detail);
   }
@@ -924,6 +949,30 @@ async function gemini(prompt, opts) {
   }
 }
 
+/** 이 API 키로 generateContent 를 쓸 수 있는 모델 이름 목록 */
+async function geminiListModels() {
+  const key = LS.get('gemini.key', '');
+  if (!key) throw new Error('Gemini API 키가 없습니다. 먼저 키를 저장하세요.');
+  let res;
+  try {
+    res = await fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=200&key=' + encodeURIComponent(key));
+  } catch (e) { throw new Error('네트워크 오류로 모델 목록을 가져오지 못했습니다.'); }
+  if (!res.ok) {
+    let d = '';
+    try { const j = await res.json(); d = (j.error && j.error.message) || ''; } catch (e) {}
+    if (res.status === 400 || res.status === 403) {
+      throw new Error('키가 거부되었습니다 (' + res.status + ').\n' +
+        'aistudio.google.com/apikey 에서 키를 다시 복사했는지, 앞뒤 공백이 섞이지 않았는지 확인하세요.\n' + d);
+    }
+    throw new Error('모델 목록을 가져오지 못했습니다 (' + res.status + ')\n' + d);
+  }
+  const data = await res.json();
+  return (data.models || [])
+    .filter(m => (m.supportedGenerationMethods || []).indexOf('generateContent') >= 0)
+    .map(m => String(m.name || '').replace(/^models\//, ''))
+    .filter(Boolean);
+}
+
 const AI_CACHE = {};   /* 결과를 '보드에 반영' 할 때 다시 꺼내 쓰기 위한 임시 보관 */
 
 function aiBusy(outSel, msg) {
@@ -935,8 +984,11 @@ function aiError(outSel, err) {
 
 function renderAI(d) {
   const on = aiReady();
-  $('#ai-status').textContent = on ? '연결됨' : '미연결';
-  $('#ai-status').dataset.on = on ? '1' : '0';
+  /* '연결됨' 은 실제로 한 번 통신에 성공했을 때만 — 키가 있다고 초록을 켜지 않는다 */
+  const verified = LS.get('gemini.verified', '');
+  $('#ai-status').textContent = !on ? '키 없음'
+    : verified ? '확인됨 · ' + verified : '키 저장됨 (연결 테스트 필요)';
+  $('#ai-status').dataset.on = (on && verified) ? '1' : '0';
   if (document.activeElement !== $('#ai-model')) $('#ai-model').value = LS.get('gemini.model', '') || '';
   if (document.activeElement !== $('#ai-key') && LS.get('gemini.key', '')) $('#ai-key').placeholder = '저장됨 (••••)';
   $$('.ai-tool .btn-primary').forEach(b => b.disabled = !on);
@@ -951,15 +1003,50 @@ $('#ai-save').addEventListener('click', () => {
   const k = $('#ai-key').value.trim();
   if (k) { LS.set('gemini.key', k); $('#ai-key').value = ''; }
   LS.set('gemini.model', $('#ai-model').value.trim());
-  toast(k ? '키를 저장했습니다 (이 브라우저에만)' : '모델을 저장했습니다');
+  LS.del('gemini.verified');          /* 키·모델이 바뀌었으니 다시 확인해야 한다 */
+  toast(k ? '키를 저장했습니다 (이 브라우저에만) — 연결 테스트를 눌러보세요' : '모델을 저장했습니다');
   render();
 });
-$('#ai-clear').addEventListener('click', () => { LS.del('gemini.key'); $('#ai-key').placeholder = 'AIza...'; toast('키를 삭제했습니다'); render(); });
+$('#ai-clear').addEventListener('click', () => {
+  LS.del('gemini.key'); LS.del('gemini.verified');
+  $('#ai-key').placeholder = 'AIza...'; toast('키를 삭제했습니다'); render();
+});
 $('#ai-test').addEventListener('click', async () => {
-  const box = $('#ai-out-expand'); aiBusy('#ai-out-expand', '연결 테스트 중…');
-  try { const t = await gemini('연결 테스트입니다. "연결 정상"이라고만 답하세요.', { temp: 0 });
-    box.innerHTML = '<div class="ai-card">✅ ' + esc(t) + '</div>'; }
-  catch (e) { aiError('#ai-out-expand', e); }
+  aiBusy('#ai-out-key', '연결 테스트 중…');
+  const model = LS.get('gemini.model', '') || DEFAULT_MODEL;
+  try {
+    const t = await gemini('연결 테스트입니다. "연결 정상"이라고만 답하세요.', { temp: 0 });
+    LS.set('gemini.verified', model);
+    $('#ai-out-key').innerHTML = '<div class="ai-card">✅ <b>' + esc(model) + '</b> 응답: ' + esc(t) + '</div>';
+    render();
+  } catch (e) { LS.del('gemini.verified'); aiError('#ai-out-key', e); render(); }
+});
+
+/* 이 키로 실제로 쓸 수 있는 모델 목록 → 클릭 한 번으로 선택 */
+$('#ai-models').addEventListener('click', async () => {
+  aiBusy('#ai-out-key', '모델 목록을 가져오는 중…');
+  try {
+    const list = await geminiListModels();
+    if (!list.length) { $('#ai-out-key').innerHTML = '<div class="ai-error">쓸 수 있는 모델이 없습니다.</div>'; return; }
+    const cur = LS.get('gemini.model', '') || DEFAULT_MODEL;
+    const chip = n => '<button class="btn btn-xs' + (n === cur ? ' btn-primary' : '') +
+      '" data-model="' + esc(n) + '">' + esc(n) + '</button>';
+    const rec = list.filter(n => /flash/.test(n) && !/vision|embedding|aqa|tts|image|live|thinking/.test(n));
+    $('#ai-out-key').innerHTML =
+      (rec.length ? '<div class="ai-card"><h4>추천 <span class="muted small">— 빠르고 무료 한도가 넉넉합니다</span></h4>' +
+        '<div class="ai-actions">' + rec.map(chip).join('') + '</div></div>' : '') +
+      '<div class="ai-card"><h4>전체 (' + list.length + '개)</h4>' +
+      '<div class="ai-actions">' + list.map(chip).join('') + '</div></div>' +
+      '<p class="hint">이름을 누르면 그 모델로 바뀌고 저장됩니다. 그다음 <b>연결 테스트</b>를 눌러 확인하세요.</p>';
+  } catch (e) { aiError('#ai-out-key', e); }
+});
+document.addEventListener('click', e => {
+  const b = e.target.closest('[data-model]'); if (!b) return;
+  const m = b.dataset.model;
+  LS.set('gemini.model', m); LS.del('gemini.verified');
+  $('#ai-model').value = m;
+  toast('모델을 ' + m + ' 로 바꿨습니다 — 연결 테스트를 눌러보세요');
+  render();
 });
 
 /* ① 아이디어 확장 */
